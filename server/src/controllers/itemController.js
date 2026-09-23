@@ -1,29 +1,94 @@
-import { Item } from '../models/Item.js';
+import { Item } from "../models/Item.js";
+import Joi from "joi"; //for communication thro http
 
+// Categories and statuses matching the Item model enum
+const CATEGORIES = [
+  "electronics",
+  "clothing",
+  "documents",
+  "accessories",
+  "other",
+];
+const STATUSES = ["lost", "found", "claimed"];
 // TODO: write a validation schema for create/update per README.md section 2.
-
+//validate create()
+const createSchema = Joi.object({
+  //define bec req.body
+  title: Joi.string().trim().min(1).max(100).required(),
+  description: Joi.string().trim().allow("", null),
+  category: Joi.string()
+    .valid(...CATEGORIES)
+    .default("other"),
+  status: Joi.string()
+    .valid(...STATUSES)
+    .default("lost"),
+  location: Joi.string().trim().allow("", null),
+  reportedBy: Joi.string().hex().length(24).allow(null), // Validates MongoDB ObjectId format
+});
+//validate update
+const updateSchema = Joi.object({
+  title: Joi.string().trim().min(1).max(100),
+  description: Joi.string().trim().allow("", null),
+  category: Joi.string().valid(...CATEGORIES),
+  status: Joi.string().valid(...STATUSES),
+  location: Joi.string().trim().allow("", null),
+  reportedBy: Joi.string().hex().length(24).allow(null),
+}).min(1);
 // GET /api/items
 // TODO: implement per README.md section 3.
 export async function getAllItems(req, res, next) {
   try {
-    // TODO
-  } catch (err) { next(err); }
+    //empty filter obj to append in requests
+    const filter = {};
+    if (req.query.status) filter.status = req.query.status;
+    if (req.query.category) filter.category = req.query.category;
+
+    const items = await Item.find(filter)
+      .populate("reportedBy", "name email")
+      .sort({ createdAt: -1 });
+
+    res.json({ items });
+  } catch (err) {
+    next(err);
+  }
 }
 
 // GET /api/items/:id
 // TODO: implement per README.md section 3.
 export async function getItem(req, res, next) {
   try {
-    // TODO
-  } catch (err) { next(err); }
+    const item = await Item.findById(req.params.id).populate(
+      "reportedBy",
+      "name email",
+    );
+    if (!item) return res.status(404).json({ message: "Item not found" });
+    res.json({ item });
+  } catch (err) {
+    next(err);
+  }
 }
 
 // POST /api/items
 // TODO: implement per README.md section 3.
 export async function createItem(req, res, next) {
   try {
-    // TODO
+    const { value, error } = createSchema.validate(req.body, {
+      abortEarly: false,
+      stripUnknown: true,
+    });
+    if (error) return res.status(400).json({ message: error.message });
+
+    const item = await Item.create(value);
+    res.status(201).json({ item });
   } catch (err) {
+    // Catch MongoDB duplicate key error for our compound unique index
+    if (err.code === 11000) {
+      return res
+        .status(409)
+        .json({
+          message: "An item with this title already exists at this location",
+        });
+    }
     next(err);
   }
 }
@@ -32,14 +97,33 @@ export async function createItem(req, res, next) {
 // TODO: implement per README.md section 3.
 export async function updateItem(req, res, next) {
   try {
-    // TODO
-  } catch (err) { next(err); }
+    const { value, error } = updateSchema.validate(req.body, {
+      abortEarly: false,
+      stripUnknown: true,
+    });
+    if (error) return res.status(400).json({ message: error.message });
+    //validate input
+    const item = await Item.findByIdAndUpdate(
+      req.params.id,
+      { $set: value },
+      { new: true, runValidators: true },
+    ).populate("reportedBy", "name email"); // db logic
+
+    if (!item) return res.status(404).json({ message: "Item not found" });
+    res.json({ item }); //reply
+  } catch (err) {
+    next(err);
+  }
 }
 
 // DELETE /api/items/:id
 // TODO: implement per README.md section 3.
 export async function deleteItem(req, res, next) {
   try {
-    // TODO
-  } catch (err) { next(err); }
+    const item = await Item.findByIdAndDelete(req.params.id);
+    if (!item) return res.status(404).json({ message: "Item not found" });
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
 }
